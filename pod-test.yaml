@@ -1,0 +1,28 @@
+﻿kind: Pod
+apiVersion: v1
+metadata:
+  name: nvme-test
+  namespace: cpt
+spec:
+  nodeSelector:
+    node-role.kubernetes.io/konflux-tenants: ""
+  restartPolicy: Always
+  containers:
+    - resources:
+        requests:
+          cpu: "1"
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+      name: test
+      imagePullPolicy: Always
+      image: "quay.io/app-sre/ubi8-ubi-minimal:latest"
+      command: ["/bin/bash"]
+      args: ["-xec", "dd if=/dev/urandom of=/cache/sample.txt bs=10M count=1000 iflag=fullblock; sleep 1000"]
+      volumeMounts:
+        - mountPath: /cache
+          name: cache-volume
+  volumes:
+    - name: cache-volume
+      emptyDir: {}
