@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nvme-storage-configurator
+  namespace: kube-system
+data:
+  configure.sh: |
+    #!/usr/bin/env bash
+
+    # Enable debugging
+    set -x
+
+    cp -f /scripts/configuration.sh /host-usr-local-bin/configuration.sh
+    chmod 0755 /host-usr-local-bin/configuration.sh
+    
+    cp -f /scripts/nvme-storage.service /host-etc-systemd-dir/nvme-storage.service
+    chmod 0644 /host-etc-systemd-dir/nvme-storage.service
+
+    nsenter -t 1 -m -u -i -n -p -- systemctl daemon-reload
+    nsenter -t 1 -m -u -i -n -p -- systemctl enable --now nvme-storage.service
+    nsenter -t 1 -m -u -i -n -p -- sleep 10
+    nsenter -t 1 -m -u -i -n -p -- restorecon -R -v -F /home/nvme/var-lib-kubelet
+    nsenter -t 1 -m -u -i -n -p -- restorecon -R -v -F /sysroot/ostree/deploy/rhcos/var/lib/kubelet
+    nsenter -t 1 -m -u -i -n -p -- restorecon -R -v -F /home/nvme/var-lib-containers
+    nsenter -t 1 -m -u -i -n -p -- restorecon -R -v -F /sysroot/ostree/deploy/rhcos/var/lib/containers
+
+    if [ $? -eq 0 ]; then
+        echo "The last command was successful. Exiting gracefully."
+        exit 0
+    else
+        echo "The last command failed. Exiting with an error."
+        exit 1
+    fi
+
+  configuration.sh: |
+    #!/usr/bin/env bash
+
+    set -x
+
+    export DEVICE="/dev/nvme1n1"
+    export MOUNT_POINT="/home/nvme"
+    export CONTAINER_DIR="/sysroot/ostree/deploy/rhcos/var/lib"
+    export FSTYPE="xfs"
+
+    mkdir -p ${MOUNT_POINT}
+
+    if lsblk -no FSTYPE "$DEVICE" | grep -qE '\S'; then
+        echo "File system already exists on $DEVICE."
+    else
+        echo "No file system found on $DEVICE. Creating XFS filesystem..."
+        mkfs -t "$FSTYPE" "$DEVICE"
+    fi
+
+    if ! grep -q "$DEVICE $MOUNT_POINT" /etc/fstab; then
+        echo "$DEVICE $MOUNT_POINT $FSTYPE defaults 0 0" >> /etc/fstab
+    fi
+
+    mount -a
+    mkdir -p /home/nvme/var-lib-kubelet /home/nvme/var-lib-containers
+    mount --bind /sysroot/ostree/deploy/rhcos/var/lib/kubelet /home/nvme/var-lib-kubelet
+    mount --bind /sysroot/ostree/deploy/rhcos/var/lib/containers /home/nvme/var-lib-containers
+
+    echo "Filesystem setup and mounting complete."
+
+  nvme-storage.service: |
+    [Unit]
+    Description=Custom Service for NVMe Storage
+    DefaultDependencies=no
+    Before=kubelet.service network-pre.target
+    After=sysinit.target 
+
+    [Service]
+    Type=oneshot
+    RemainAfterExit=yes
+    ExecStart=/usr/local/bin/configuration.sh
