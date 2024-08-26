@@ -19,7 +19,7 @@ spec:
       imagePullPolicy: Always
       image: "quay.io/app-sre/ubi8-ubi-minimal:latest"
       command: ["/bin/bash"]
-      args: ["-xec", "dd if=/dev/urandom of=/cache/sample.txt bs=10M count=1000 iflag=fullblock; sleep 1000"]
+      args: ["-xec", "time dd if=/dev/urandom of=/cache/sample.txt bs=10M count=1000 iflag=fullblock; sleep 1000"]
       volumeMounts:
         - mountPath: /cache
           name: cache-volume
