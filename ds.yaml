@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: nvme-storage-configurator
+  namespace: nvme-storage-config
   labels:
     app: nvme-storage-configurator
-  namespace: kube-system
 spec:
   selector:
     matchLabels:
@@ -21,7 +21,7 @@ spec:
       initContainers:
         - name: configure
           image: "quay.io/openshift/origin-network-tools"
-          command: ['/bin/bash', '-c', 'mkdir /cache && cp /scripts/configure.sh /cache && chmod +x /cache/configure.sh && /bin/bash /cache/configure.sh && exit 0']
+          command: ['/bin/bash', '-c', '/bin/bash -x /scripts/configure.sh']
           securityContext:
             privileged: true
           volumeMounts:
@@ -29,10 +29,6 @@ spec:
               name: script-config
             - mountPath: /host-etc-systemd-dir
               name: etc-systemd-dir
-            - mountPath: /host-usr-local-bin
-              name: usr-local-bin
-            - mountPath: /host-etc-systctld-dir
-              name: etc-systctld-dir
       containers:
         - name: pause
           image: registry.redhat.io/rhel8/pause:8.10
@@ -40,12 +36,6 @@ spec:
         - name: etc-systemd-dir
           hostPath:
             path: /etc/systemd/system
-        - name: etc-systctld-dir
-          hostPath:
-            path: /etc/sysctl.d
-        - name: usr-local-bin
-          hostPath:
-            path: /usr/local/bin
         - name: script-config
           configMap:
             name: nvme-storage-configurator
