@@ -7,14 +7,20 @@ data:
   configure.sh: |
     #!/usr/bin/env bash
 
+    if [ -f /host-etc-systemd-dir/nvme-init-done ]; then
+      echo 'NVMe init already done'
+      exit 0
+    fi
+
     for i in nvme-storage-format.service var-home-nvme.mount nvme-storage-dirs.service var-lib-kubelet.mount var-lib-containers.mount; do
       cp -f "/scripts/$i" "/host-etc-systemd-dir/$i"
       chmod 0644 "/host-etc-systemd-dir/$i"
     done
 
     nsenter -t 1 -m -u -i -n -p -- systemctl daemon-reload
-    nsenter -t 1 -m -u -i -n -p -- systemctl enable nvme-storage-format.service var-home-nvme.mount nvme-storage-dirs.service var-lib-kubelet.mount var-lib-containers.mount
-    nsenter -t 1 -m -u -i -n -p -- systemctl reboot
+    ###nsenter -t 1 -m -u -i -n -p -- systemctl enable nvme-storage-format.service var-home-nvme.mount nvme-storage-dirs.service var-lib-kubelet.mount var-lib-containers.mount
+    touch /host-etc-systemd-dir/nvme-init-done
+    ###nsenter -t 1 -m -u -i -n -p -- systemctl reboot
 
   nvme-storage-format.service: |
     [Unit]
@@ -26,7 +32,7 @@ data:
     Type=oneshot
     RemainAfterExit=yes
     Restart=no
-    ExecStart=/bin/bash -xc "lsblk -no FSTYPE /dev/nvme1n1 | grep -qE '\S' && echo 'Already formated' || mkfs -t xfs /dev/nvme1n1"
+    ExecStart=/bin/bash -xc "lsblk -no FSTYPE /dev/nvme0n1 | grep -qE '\S' && echo 'Already formated' || mkfs -t xfs /dev/nvme1n1"
 
   var-home-nvme.mount: |
     [Unit]
@@ -37,7 +43,7 @@ data:
 
     [Mount]
     What=/dev/nvme1n1
-    Where=/home/nvme
+    Where=/var/home/nvme
     Type=xfs
     DirectoryMode=0755
 
