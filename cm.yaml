@@ -32,7 +32,7 @@ data:
     Type=oneshot
     RemainAfterExit=yes
     Restart=no
-    ExecStart=/bin/bash -xc "lsblk -no FSTYPE /dev/nvme0n1 | grep -qE '\S' && echo 'Already formated' || mkfs -t xfs /dev/nvme1n1"
+    ExecStart=/bin/bash -xc "lsblk -no FSTYPE /dev/nvme0n1 | grep -q ^. && echo 'Already formated' || mkfs -t xfs /dev/nvme1n1"
 
   var-home-nvme.mount: |
     [Unit]
