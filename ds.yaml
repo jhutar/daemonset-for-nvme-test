@@ -29,6 +29,8 @@ spec:
               name: script-config
             - mountPath: /host-etc-systemd-dir
               name: etc-systemd-dir
+            - mountPath: /host-dev-dir
+              name: dev-dir
       containers:
         - name: pause
           image: registry.redhat.io/rhel8/pause:8.10
@@ -36,6 +38,9 @@ spec:
         - name: etc-systemd-dir
           hostPath:
             path: /etc/systemd/system
+        - name: dev-dir
+          hostPath:
+            path: /dev
         - name: script-config
           configMap:
             name: nvme-storage-configurator
