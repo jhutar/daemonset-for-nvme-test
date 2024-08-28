@@ -7,8 +7,7 @@ data:
   configure.sh: |
     #!/usr/bin/env bash
 
-    # Enable debugging
-    set -x
+    set -eux
 
     if [ -f /host-etc-systemd-dir/nvme-init-done ]; then
         echo 'NVMe init already done'
@@ -22,29 +21,19 @@ data:
     chmod 0644 /host-etc-systemd-dir/nvme-storage.service
 
     nsenter -t 1 -m -u -i -n -p -- systemctl daemon-reload
-    nsenter -t 1 -m -u -i -n -p -- systemctl enable --now nvme-storage.service
-    nsenter -t 1 -m -u -i -n -p -- sleep 10
-    nsenter -t 1 -m -u -i -n -p -- restorecon -R -v -F /var/lib/containers /var/lib/kubelet/pods
+    nsenter -t 1 -m -u -i -n -p -- systemctl enable nvme-storage.service
     touch /host-etc-systemd-dir/nvme-init-done
-    nsenter -t 1 -m -u -i -n -p -- systemctl restart kubelet.service
-
-    if [ $? -eq 0 ]; then
-        echo "The last command was successful. Exiting gracefully."
-        exit 0
-    else
-        echo "The last command failed. Exiting with an error."
-        exit 1
-    fi
+    nsenter -t 1 -m -u -i -n -p -- systemctl reboot
 
   configuration.sh: |
     #!/usr/bin/env bash
 
-    set -x
+    set -eux
 
-    DEVICE="/dev/nvme1n1"
+    DEVICE="$( ls /dev/disk/by-id/nvme-Amazon_EC2_NVMe_Instance_Storage_* | sort | head -n1 )"
     echo "Going to use device $DEVICE"
 
-    export MOUNT_POINT="/home/nvme"
+    export MOUNT_POINT="/var/home/nvme"
     export TARGET_DIR="/var/lib"
     export FSTYPE="xfs"
 
@@ -57,27 +46,15 @@ data:
         mkfs -t "$FSTYPE" "$DEVICE"
     fi
 
-    if ! grep -q "$DEVICE $MOUNT_POINT" /etc/fstab; then
-        echo "$DEVICE $MOUNT_POINT $FSTYPE defaults 0 0" >> /etc/fstab
-    fi
+    mount -t "${FSTYPE}" "${DEVICE}" "${MOUNT_POINT}"
 
-    mount -a
-
-    mount
-
-    mkdir -p ${MOUNT_POINT}/var-lib-kubelet
-    mount --bind /var/home/nvme/var-lib-kubelet ${TARGET_DIR}/kubelet/pods
+    mkdir -p ${MOUNT_POINT}/var-lib-kubelet-pods
+    mount --bind /var/home/nvme/var-lib-kubelet-pods ${TARGET_DIR}/kubelet/pods
 
     mkdir -p ${MOUNT_POINT}/var-lib-containers
     mount --bind /var/home/nvme/var-lib-containers ${TARGET_DIR}/containers
 
-    if [ $? -ne 0 ]; then
-        echo "Mount Failed"
-        mkdir -p /home/nvme/var-lib-kubelet /home/nvme/var-lib-containers
-        mount -a
-    fi
-
-    systemctl daemon-reload
+    restorecon -R -v -F /var/lib/containers /var/lib/kubelet/pods
 
     echo "Filesystem setup and mounting complete."
 
