@@ -7,109 +7,73 @@ data:
   configure.sh: |
     #!/usr/bin/env bash
 
+    # Enable debugging
+    set -eux
+
     if [ -f /host-etc-systemd-dir/nvme-init-done ]; then
-      echo 'NVMe init already done'
-      exit 0
+        echo 'NVMe init already done'
+        exit 0
     fi
 
-    # We can not rely on device name like /dev/nvme1n1
-    DEVICE="$( ls /host-dev-dir/disk/by-id/nvme-Amazon_EC2_NVMe_Instance_Storage_* | sort | head -n1 | sed "s|^/host-dev-dir|/dev|" )"
-    echo "Going to use device $DEVICE"
+    cp -f /scripts/configuration.sh /host-usr-local-bin/configuration.sh
+    chmod 0755 /host-usr-local-bin/configuration.sh
 
-    # Deploy SystemD config
-    for i in nvme-storage-format.service var-home-nvme.mount nvme-storage-dirs.service var-lib-kubelet-pods.mount var-lib-containers.mount nvme-storage-restorecon.service; do
-      cp -f "/scripts/$i" "/host-etc-systemd-dir/$i"
-      chmod 0644 "/host-etc-systemd-dir/$i"
-      sed -i "s|DEVICE|$DEVICE|g" "/host-etc-systemd-dir/$i"
-    done
+    cp -f /scripts/nvme-storage.service /host-etc-systemd-dir/nvme-storage.service
+    chmod 0644 /host-etc-systemd-dir/nvme-storage.service
 
     nsenter -t 1 -m -u -i -n -p -- systemctl daemon-reload
-    nsenter -t 1 -m -u -i -n -p -- systemctl enable nvme-storage-format.service var-home-nvme.mount nvme-storage-dirs.service var-lib-kubelet-pods.mount var-lib-containers.mount nvme-storage-restorecon.service
+    nsenter -t 1 -m -u -i -n -p -- systemctl enable nvme-storage.service
     touch /host-etc-systemd-dir/nvme-init-done
     nsenter -t 1 -m -u -i -n -p -- systemctl reboot
 
-  nvme-storage-format.service: |
+
+  configuration.sh: |
+    #!/usr/bin/env bash
+
+    # Enable debugging
+    set -eux
+
+    DEVICE="$( ls /dev/disk/by-id/nvme-Amazon_EC2_NVMe_Instance_Storage_* | sort | head -n1 )"
+    echo "Going to use device $DEVICE"
+
+    export MOUNT_POINT="/var/home/nvme"
+    export TARGET_DIR="/var/lib"
+    export FSTYPE="xfs"
+
+    mkdir -p ${MOUNT_POINT}
+
+    if lsblk -no FSTYPE "$DEVICE" | grep -qE '\S'; then
+        echo "File system already exists on $DEVICE."
+    else
+        echo "No file system found on $DEVICE. Creating XFS filesystem..."
+        mkfs -t "$FSTYPE" "$DEVICE"
+    fi
+
+    if ! grep -q "$DEVICE $MOUNT_POINT" /etc/fstab; then
+        echo "$DEVICE $MOUNT_POINT $FSTYPE defaults 0 0" >> /etc/fstab
+    fi
+
+    mkdir -p ${MOUNT_POINT}/var-lib-kubelet-pods
+    mount --bind /var/home/nvme/var-lib-kubelet-pods ${TARGET_DIR}/kubelet/pods
+
+    mkdir -p ${MOUNT_POINT}/var-lib-containers
+    mount --bind /var/home/nvme/var-lib-containers ${TARGET_DIR}/containers
+
+    restorecon -R -v -F /var/lib/kubelet/pods /var/lib/containers
+
+    echo "Filesystem setup and mounting complete."
+
+  nvme-storage.service: |
     [Unit]
-    Description=Format NVMe drive if needed
-    Before=var-home-nvme.mount
-    After=sysinit.target
-
-    [Service]
-    Type=oneshot
-    RemainAfterExit=yes
-    Restart=no
-    ExecStart=/bin/bash -xc "lsblk -no FSTYPE DEVICE | grep -q ^. && echo 'Already formated' || mkfs -t xfs DEVICE"
-
-  var-home-nvme.mount: |
-    [Unit]
-    Description=Mount NVMe drive
-    After=nvme-storage-format.service
-    BindsTo=nvme-storage-format.service
-    Before=local-fs.target
-
-    [Mount]
-    What=DEVICE
-    Where=/var/home/nvme
-    Type=xfs
-    DirectoryMode=0755
-
-  nvme-storage-dirs.service: |
-    [Unit]
-    Description=Create directories on NVMe drive if needed
-    After=var-home-nvme.mount
-    BindsTo=var-home-nvme.mount
-    Before=var-lib-kubelet-pods.mount var-lib-containers.mount
-
-    [Service]
-    Type=oneshot
-    RemainAfterExit=yes
-    Restart=no
-    ExecStart=/bin/bash -xc "mkdir -p /var/home/nvme/var-lib-kubelet-pods /var/home/nvme/var-lib-containers"
-
-  var-lib-kubelet-pods.mount: |
-    [Unit]
-    Description=Bind mount kubelet/pods directory on NVMe drive
-    Before=nvme-storage-restorecon.service
-    After=nvme-storage-dirs.service
-    BindsTo=nvme-storage-dirs.service
-
-    [Mount]
-    Where=/var/lib/kubelet/pods
-    What=/var/home/nvme/var-lib-kubelet-pods
-    Options=bind
-    DirectoryMode=0755
-
-    [Install]
-    RequiredBy=kubelet-dependencies.target
-
-  var-lib-containers.mount: |
-    [Unit]
-    Description=Bind mount containers directory on NVMe drive
-    Before=nvme-storage-restorecon.service
-    After=nvme-storage-dirs.service
-    BindsTo=nvme-storage-dirs.service
-
-    [Mount]
-    Where=/var/lib/containers
-    What=/var/home/nvme/var-lib-containers
-    Options=bind
-    DirectoryMode=0755
-
-    [Install]
-    RequiredBy=kubelet-dependencies.target
-
-  nvme-storage-restorecon.service: |
-    [Unit]
-    Description=Restorecon on bind mounted dirs
+    Description=Custom Service for NVMe Storage
+    DefaultDependencies=no
     Before=local-fs.target kubelet-dependencies.target
-    After=var-lib-kubelet-pods.mount var-lib-containers.mount
-    BindsTo=var-home-nvme.mount
+    After=sysinit.target 
 
     [Service]
     Type=oneshot
     RemainAfterExit=yes
-    Restart=no
-    ExecStart=/bin/bash -xc "restorecon -R -v -F /var/lib/containers /var/lib/kubelet/pods"
+    ExecStart=/usr/local/bin/configuration.sh
 
     [Install]
     RequiredBy=kubelet-dependencies.target
