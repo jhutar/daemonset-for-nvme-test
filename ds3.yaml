@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvme-storage-configurator
+  labels:
+    app: nvme-storage-configurator
+  namespace: nvme-storage-config
+spec:
+  selector:
+    matchLabels:
+      app: nvme-storage-configurator
+  template:
+    metadata:
+      labels:
+        app: nvme-storage-configurator
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/konflux-tenants: ""
+      hostPID: true
+      serviceAccount: nvme-storage-configurator
+      initContainers:
+        - name: configure
+          image: "quay.io/openshift/origin-network-tools"
+          command: ['/bin/bash', '-c', 'mkdir /cache && cp /scripts/configure.sh /cache && chmod +x /cache/configure.sh && /bin/bash /cache/configure.sh && exit 0']
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - mountPath: /scripts
+              name: script-config
+            - mountPath: /host-etc-systemd-dir
+              name: etc-systemd-dir
+            - mountPath: /host-usr-local-bin
+              name: usr-local-bin
+            - mountPath: /host-etc-systctld-dir
+              name: etc-systctld-dir
+            - mountPath: /host-dev-dir
+              name: dev-dir
+      containers:
+        - name: pause
+          image: registry.redhat.io/rhel8/pause:8.10
+      volumes:
+        - name: etc-systemd-dir
+          hostPath:
+            path: /etc/systemd/system
+        - name: etc-systctld-dir
+          hostPath:
+            path: /etc/sysctl.d
+        - name: usr-local-bin
+          hostPath:
+            path: /usr/local/bin
+        - name: dev-dir
+          hostPath:
+            path: /dev
+        - name: script-config
+          configMap:
+            name: nvme-storage-configurator
